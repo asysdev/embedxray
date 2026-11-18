@@ -1,11 +1,11 @@
+.venv/
+venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.venv/
-*.egg-info/
-build/
 dist/
-.coverage
+build/
+*.egg-info/
+xray_out/
+*.html
 .DS_Store
-/xray_out/
-/xray_results/
