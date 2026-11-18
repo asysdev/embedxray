@@ -32,7 +32,21 @@ def chunked_topk_cosine(
     """Retrieves by cosine similarity, breaking ties by ascending corpus index."""
     q_norm = safe_l2_normalize(queries)
     c_norm = q_norm if queries is corpus else safe_l2_normalize(corpus)
-    return _chunked_topk_dot(q_norm, c_norm, k, chunk_size, exclude_self)
+    return _chunked_topk_normalized_cosine(q_norm, c_norm, k, chunk_size, exclude_self)
+
+
+def _chunked_topk_normalized_cosine(
+    queries: torch.Tensor,
+    corpus: torch.Tensor,
+    k: int,
+    chunk_size: int,
+    exclude_self: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Scores normalized vectors with FP64 accumulation on CPU to reduce rounding differences."""
+    accumulation_dtype = torch.float64 if queries.device.type == "cpu" else torch.float32
+    return _chunked_topk_dot(
+        queries, corpus, k, chunk_size, exclude_self, accumulation_dtype=accumulation_dtype
+    )
 
 
 def _chunked_topk_dot(
@@ -41,8 +55,10 @@ def _chunked_topk_dot(
     k: int,
     chunk_size: int,
     exclude_self: bool,
+    *,
+    accumulation_dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Ranks dot products from bounded query and corpus blocks."""
+    """Ranks FP32 scores from bounded query and corpus blocks."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer.")
     if k < 0:
@@ -69,7 +85,7 @@ def _chunked_topk_dot(
 
     for q_start in range(0, num_queries, chunk_size):
         q_end = min(q_start + chunk_size, num_queries)
-        q_chunk = queries[q_start:q_end]
+        q_chunk = queries[q_start:q_end].to(accumulation_dtype)
         running_vals = values[q_start:q_end, :0]
         running_idx = indices[q_start:q_end, :0]
 
@@ -78,9 +94,8 @@ def _chunked_topk_dot(
 
         for c_start in range(0, num_corpus, corpus_chunk_size):
             c_end = min(c_start + corpus_chunk_size, num_corpus)
-            c_chunk = corpus[c_start:c_end]
-
-            sim_chunk = torch.matmul(q_chunk, c_chunk.transpose(0, 1))
+            c_chunk = corpus[c_start:c_end].to(accumulation_dtype)
+            sim_chunk = torch.matmul(q_chunk, c_chunk.transpose(0, 1)).to(torch.float32)
 
             if exclude_self:
                 c_global_idx = torch.arange(c_start, c_end, device=queries.device).unsqueeze(0)

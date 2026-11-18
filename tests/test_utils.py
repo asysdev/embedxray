@@ -171,3 +171,22 @@ def test_topk_ties_and_similarity_block_sizes(
             shape = (left.size(0), right.size(1))
             assert max(shape) <= chunk_size
             assert shape != (6, 6)
+
+
+def test_cpu_cosine_handles_shape_dependent_rounding() -> None:
+    query = torch.ones(1, 3)
+    corpus = torch.tensor([[1.0, 1e-8, -1.0], [-1.0, -1.0, -1.0], [1.0, 1e-8, -1.0]])
+
+    def alternate_kernel(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+        terms = left.unsqueeze(2) * right.unsqueeze(0)
+        if right.size(1) == 1:
+            terms = terms[:, [0, 2, 1]]
+        return (terms[:, 0] + terms[:, 1]) + terms[:, 2]
+
+    with patch("torch.matmul", side_effect=alternate_kernel):
+        split_scores, split_indices = chunked_topk_cosine(query, corpus, 1, chunk_size=2)
+        full_scores, full_indices = chunked_topk_cosine(query, corpus, 1, chunk_size=3)
+
+    assert split_scores.dtype == full_scores.dtype == torch.float32
+    assert torch.equal(split_scores, full_scores)
+    assert split_indices.tolist() == full_indices.tolist() == [[0]]

@@ -14,7 +14,7 @@ from embedxray.utils.quantization import (
     simulate_int8,
 )
 from embedxray.utils.tensor_ops import (
-    _chunked_topk_dot,
+    _chunked_topk_normalized_cosine,
     chunked_topk_cosine,
     safe_l2_normalize,
 )
@@ -104,7 +104,9 @@ def evaluate_fracture(
 
     base_corpus = safe_l2_normalize(corpus_embeddings)
     base_queries = base_corpus if exclude_self else safe_l2_normalize(queries)
-    base_indices = _chunked_topk_dot(base_queries, base_corpus, k, chunk_size, exclude_self)[1]
+    base_indices = _chunked_topk_normalized_cosine(
+        base_queries, base_corpus, k, chunk_size, exclude_self
+    )[1]
     overlap_available = base_indices.numel() > 0
 
     grid: list[dict[str, Any]] = []
@@ -126,7 +128,7 @@ def evaluate_fracture(
             cand_indices = base_indices
             if mode == "fp32":
                 if dim != full_dim and overlap_available:
-                    cand_indices = _chunked_topk_dot(
+                    cand_indices = _chunked_topk_normalized_cosine(
                         q_slice, c_slice, k, chunk_size, exclude_self
                     )[1]
                 c_quant = c_slice
